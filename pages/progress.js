@@ -1,5 +1,5 @@
 // pages/progress.js
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
 
@@ -16,39 +16,44 @@ export default function ProgressPage() {
   const [errorMsg, setErrorMsg] = useState('')
   const [infoMsg, setInfoMsg] = useState('')
 
-  // --- 登录检查：优先读现有 session，其次监听变化 ---
+  // 检查登录并监听会话
   useEffect(() => {
-    let authSub
+    let sub
     const init = async () => {
       try {
         const { data, error } = await supabase.auth.getSession()
         if (error) throw error
-        const u = data?.session?.user
+        const u = data?.session?.user || null
         if (!u) {
           router.replace('/login')
           return
         }
         setUser(u)
       } catch (e) {
-        setErrorMsg(`获取登录状态失败：${e.message || e}`)
+        setErrorMsg(`获取登录状态失败：${e?.message || e}`)
       } finally {
         setLoading(false)
       }
-      // 监听登录状态变化
-      const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+
+      const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
         const u = session?.user || null
         setUser(u)
         if (!u) router.replace('/login')
       })
-      authSub = sub
+      sub = listener
     }
+
     init()
     return () => {
-      authSub?.subscription?.unsubscribe?.()
+      try {
+        sub?.subscription?.unsubscribe?.()
+      } catch (e) {
+        // ignore
+      }
     }
   }, [router])
 
-  // --- 拉取任务列表 ---
+  // 获取任务
   const fetchTasks = async () => {
     if (!user) return
     setErrorMsg('')
@@ -56,14 +61,13 @@ export default function ProgressPage() {
     try {
       const { data, error } = await supabase
         .from('progress')
-        .select('*')
+        .select('id, task, progress, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true })
       if (error) throw error
       setTasks(data || [])
     } catch (e) {
-      // 常见 503/策略问题在这里能看到 message
-      setErrorMsg(`获取任务失败：${e.message || e}`)
+      setErrorMsg(`获取任务失败：${e?.message || e}`)
     }
   }
 
@@ -72,7 +76,7 @@ export default function ProgressPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
-  // --- 添加任务 ---
+  // 添加任务
   const addTask = async () => {
     if (!newTask.trim() || !user) return
     setAdding(true)
@@ -84,70 +88,53 @@ export default function ProgressPage() {
         .insert([{ task: newTask.trim(), user_id: user.id, progress: 0 }])
       if (error) throw error
       setNewTask('')
-      setInfoMsg('添加成功 ✅')
+      setInfoMsg('添加成功')
       fetchTasks()
     } catch (e) {
-      setErrorMsg(`添加任务失败：${e.message || e}`)
+      setErrorMsg(`添加任务失败：${e?.message || e}`)
     } finally {
       setAdding(false)
     }
   }
 
-  // --- 更新进度（0-100）---
+  // 更新进度
   const updateProgress = async (id, value) => {
     const val = Math.min(100, Math.max(0, Number(value) || 0))
     setErrorMsg('')
     setInfoMsg('')
+    // 乐观更新
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, progress: val } : t)))
     try {
-      // 乐观更新
-      setTasks((prev) => prev.map(t => (t.id === id ? { ...t, progress: val } : t)))
       const { error } = await supabase.from('progress').update({ progress: val }).eq('id', id)
       if (error) throw error
-      setInfoMsg('进度已保存 ✅')
+      setInfoMsg('进度已保存')
     } catch (e) {
-      setErrorMsg(`更新进度失败：${e.message || e}`)
-      // 回滚：重新拉取
-      fetchTasks()
+      setErrorMsg(`更新进度失败：${e?.message || e}`)
+      fetchTasks() // 回滚
     }
   }
 
-  // --- 删除任务 ---
+  // 删除任务
   const deleteTask = async (id) => {
-    if (!confirm('确认删除这个任务吗？')) return
+    if (typeof window !== 'undefined') {
+      if (!window.confirm('确认删除这个任务吗？')) return
+    }
     setErrorMsg('')
     setInfoMsg('')
     try {
-      // 乐观更新
-      const prev = tasks
-      setTasks(prev.filter(t => t.id !== id))
       const { error } = await supabase.from('progress').delete().eq('id', id)
       if (error) throw error
-      setInfoMsg('已删除 ✅')
+      setInfoMsg('已删除')
+      setTasks((prev) => prev.filter((t) => t.id !== id))
     } catch (e) {
-      setErrorMsg(`删除失败：${e.message || e}`)
+      setErrorMsg(`删除失败：${e?.message || e}`)
       fetchTasks()
     }
   }
 
-  // --- 友好提示（比如 503）---
-  const networkHint = useMemo(() => {
-    if (!errorMsg) return ''
-    // 简单关键字判断，给出引导
-    if (/503|Service Unavailable|schema cache|Failed to fetch/i.test(errorMsg)) {
-      return '提示：这是后端连通性问题。若本地无 VPN，请以 Vercel 部署页面访问；或检查 Vercel 环境变量是否已配置并重新部署。'
-    }
-    if (/row-level security|RLS|policy|not allowed/i.test(errorMsg)) {
-      return '提示：请确认 progress 表已启用 RLS，且已配置“只允许用户访问自己的行”的策略。'
-    }
-    if (/No API key|apikey/i.test(errorMsg)) {
-      return '提示：Vercel 环境变量缺失。请在 Settings → Environment Variables 中配置 NEXT_PUBLIC_SUPABASE_URL 与 NEXT_PUBLIC_SUPABASE_ANON_KEY 并 Redeploy。'
-    }
-    return ''
-  }, [errorMsg])
-
   if (loading) {
     return (
-      <div style={styles.container}>
+      <div style={{ padding: 40, textAlign: 'center' }}>
         <p>正在检查登录状态…</p>
       </div>
     )
@@ -158,7 +145,6 @@ export default function ProgressPage() {
       <div style={styles.card}>
         <h1 style={{ marginTop: 0 }}>📊 学习进度</h1>
 
-        {/* 顶部操作区 */}
         <div style={styles.row}>
           <input
             value={newTask}
@@ -173,16 +159,9 @@ export default function ProgressPage() {
           <button onClick={fetchTasks} style={styles.ghostBtn}>刷新</button>
         </div>
 
-        {/* 消息区 */}
         {infoMsg ? <div style={styles.info}>{infoMsg}</div> : null}
-        {errorMsg ? (
-          <div style={styles.error}>
-            <div style={{ marginBottom: 6 }}>{errorMsg}</div>
-            {networkHint ? <div style={styles.hint}>{networkHint}</div> : null}
-          </div>
-        ) : null}
+        {errorMsg ? <div style={styles.error}>{errorMsg}</div> : null}
 
-        {/* 列表 */}
         <div style={{ marginTop: 10 }}>
           {(!tasks || tasks.length === 0) ? (
             <div style={styles.empty}>暂无任务，先在上方添加一个吧～</div>
@@ -192,7 +171,6 @@ export default function ProgressPage() {
                 <li key={t.id} style={styles.item}>
                   <div style={{ flex: 1, fontWeight: 500 }}>{t.task}</div>
 
-                  {/* 数字输入 */}
                   <div style={styles.progressBox}>
                     <input
                       type="number"
@@ -202,10 +180,9 @@ export default function ProgressPage() {
                       onChange={(e) => updateProgress(t.id, e.target.value)}
                       style={styles.progressInput}
                     />
-                    <span style={{ marginLeft: 4 }}>%</span>
+                    <span style={{ marginLeft: 6 }}>%</span>
                   </div>
 
-                  {/* 或者用 range（滑条），想同时保留就都给你 */}
                   <input
                     type="range"
                     min={0}
@@ -313,4 +290,27 @@ const styles = {
   empty: {
     padding: '16px 12px',
     border: '1px dashed #e5e7eb',
-  }
+    borderRadius: 10,
+    color: '#6b7280',
+    background: '#fafafa',
+    textAlign: 'center',
+  },
+  info: {
+    padding: '8px 12px',
+    background: '#ecfdf5',
+    color: '#065f46',
+    border: '1px solid #a7f3d0',
+    borderRadius: 8,
+    marginBottom: 8,
+    fontSize: 14,
+  },
+  error: {
+    padding: '10px 12px',
+    background: '#fef2f2',
+    color: '#991b1b',
+    border: '1px solid #fecaca',
+    borderRadius: 8,
+    marginBottom: 8,
+    fontSize: 14,
+  },
+}
