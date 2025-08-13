@@ -313,3 +313,4 @@ const styles = {
   empty: {
     padding: '16px 12px',
     border: '1px dashed #e5e7eb',
+  }
