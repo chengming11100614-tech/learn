@@ -1,66 +1,115 @@
 import { useState } from 'react';
-import { useRouter } from 'next/router';
 import { supabase } from '../lib/supabaseClient';
+import { useRouter } from 'next/router';
+import Link from 'next/link';
 
 export default function RegisterPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleRegister = async (e) => {
+  async function handleRegister(e) {
     e.preventDefault();
     setError('');
-    setLoading(true);
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
-    setLoading(false);
-
+    const { error } = await supabase.auth.signUp({ email, password });
     if (error) {
       setError(error.message);
     } else {
-      alert('注册成功，请查收验证邮件！');
-      router.push('/progress');
+      alert('注册成功，请登录！');
+      router.push('/login');
     }
-  };
+  }
 
   return (
-    <div style={{ maxWidth: '400px', margin: '50px auto' }}>
-      <h2>注册</h2>
-      <form onSubmit={handleRegister}>
-        <input
-          type="email"
-          placeholder="邮箱"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          style={{ width: '100%', marginBottom: '10px', padding: '8px' }}
-        />
-        <input
-          type="password"
-          placeholder="密码（至少 6 位）"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          style={{ width: '100%', marginBottom: '10px', padding: '8px' }}
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          style={{ width: '100%', padding: '10px' }}
-        >
-          {loading ? '注册中...' : '注册'}
-        </button>
-      </form>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      <p style={{ marginTop: '10px' }}>
-        已有账号？ <a href="/login">去登录</a>
-      </p>
+    <div style={styles.container}>
+      <div style={styles.card}>
+        <h2 style={styles.title}>注册</h2>
+        {error && <p style={styles.error}>{error}</p>}
+        <form onSubmit={handleRegister} style={styles.form}>
+          <input
+            type="email"
+            placeholder="邮箱"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            style={styles.input}
+          />
+          <input
+            type="password"
+            placeholder="密码"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            style={styles.input}
+          />
+          <button type="submit" style={styles.button}>注册</button>
+        </form>
+        <p style={styles.text}>
+          已有账号？
+          <Link href="/login" style={styles.link}>去登录</Link>
+        </p>
+      </div>
     </div>
   );
 }
+
+const styles = {
+  container: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100vh',
+    background: '#f5f5f5'
+  },
+  card: {
+    background: '#fff',
+    padding: '2rem',
+    borderRadius: '10px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+    width: '100%',
+    maxWidth: '400px'
+  },
+  title: {
+    textAlign: 'center',
+    marginBottom: '1.5rem'
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1rem'
+  },
+  input: {
+    padding: '0.75rem',
+    border: '1px solid #ccc',
+    borderRadius: '5px',
+    fontSize: '1rem'
+  },
+  button: {
+    padding: '0.75rem',
+    background: '#0070f3',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontSize: '1rem'
+  },
+  text: {
+    marginTop: '1rem',
+    textAlign: 'center'
+  },
+  link: {
+    marginLeft: '0.5rem',
+    color: '#0070f3',
+    textDecoration: 'underline',
+    cursor: 'pointer'
+  },
+  error: {
+    color: 'red',
+    fontSize: '0.9rem',
+    textAlign: 'center',
+    marginBottom: '1rem'
+  }
+};
+
