@@ -1,4 +1,3 @@
-// pages/progress.js
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
@@ -6,204 +5,123 @@ import Link from 'next/link'
 
 export default function ProgressPage() {
   const router = useRouter()
-
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
   const [tasks, setTasks] = useState([])
   const [newTask, setNewTask] = useState('')
+  const [estimatedMinutes, setEstimatedMinutes] = useState(25)
   const [adding, setAdding] = useState(false)
 
   const [errorMsg, setErrorMsg] = useState('')
   const [infoMsg, setInfoMsg] = useState('')
 
-  // 检查登录并监听会话
   useEffect(() => {
     let sub
     const init = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession()
-        if (error) throw error
-        const u = data?.session?.user || null
-        if (!u) {
-          router.replace('/login')
-          return
-        }
-        setUser(u)
-      } catch (e) {
-        setErrorMsg(`获取登录状态失败：${e?.message || e}`)
-      } finally {
-        setLoading(false)
+      const { data, error } = await supabase.auth.getSession()
+      if (error || !data?.session?.user) {
+        router.replace('/login')
+        return
       }
+      setUser(data.session.user)
 
       const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-        const u = session?.user || null
-        setUser(u)
-        if (!u) router.replace('/login')
+        setUser(session?.user || null)
+        if (!session?.user) router.replace('/login')
       })
       sub = listener
+      setLoading(false)
     }
-
     init()
-    return () => {
-      try {
-        sub?.subscription?.unsubscribe?.()
-      } catch (e) {
-        // ignore
-      }
-    }
+    return () => sub?.subscription?.unsubscribe?.()
   }, [router])
 
-  // 获取任务
   const fetchTasks = async () => {
     if (!user) return
-    setErrorMsg('')
-    setInfoMsg('')
-    try {
-      const { data, error } = await supabase
-        .from('progress')
-        .select('id, task, progress, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
-      if (error) throw error
-      setTasks(data || [])
-    } catch (e) {
-      setErrorMsg(`获取任务失败：${e?.message || e}`)
-    }
+    const { data, error } = await supabase
+      .from('progress')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true })
+    if (!error) setTasks(data || [])
   }
 
   useEffect(() => {
     if (user) fetchTasks()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
-  // 添加任务
   const addTask = async () => {
-    if (!newTask.trim() || !user) return
+    if (!newTask.trim()) return
     setAdding(true)
-    setErrorMsg('')
-    setInfoMsg('')
-    try {
-      const { error } = await supabase
-        .from('progress')
-        .insert([{ task: newTask.trim(), user_id: user.id, progress: 0 }])
-      if (error) throw error
+    const { error } = await supabase.from('progress').insert([{
+      task: newTask.trim(),
+      user_id: user.id,
+      progress: 0,
+      estimated_minutes: estimatedMinutes,
+      is_active: false
+    }])
+    if (!error) {
       setNewTask('')
-      setInfoMsg('添加成功')
+      setEstimatedMinutes(25)
       fetchTasks()
-    } catch (e) {
-      setErrorMsg(`添加任务失败：${e?.message || e}`)
-    } finally {
-      setAdding(false)
     }
+    setAdding(false)
   }
 
-  // 更新进度
-  const updateProgress = async (id, value) => {
-    const val = Math.min(100, Math.max(0, Number(value) || 0))
-    setErrorMsg('')
-    setInfoMsg('')
-    // 乐观更新
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, progress: val } : t)))
-    try {
-      const { error } = await supabase.from('progress').update({ progress: val }).eq('id', id)
-      if (error) throw error
-      setInfoMsg('进度已保存')
-    } catch (e) {
-      setErrorMsg(`更新进度失败：${e?.message || e}`)
-      fetchTasks() // 回滚
-    }
-  }
-
-  // 删除任务
   const deleteTask = async (id) => {
-    if (typeof window !== 'undefined') {
-      if (!window.confirm('确认删除这个任务吗？')) return
-    }
-    setErrorMsg('')
-    setInfoMsg('')
-    try {
-      const { error } = await supabase.from('progress').delete().eq('id', id)
-      if (error) throw error
-      setInfoMsg('已删除')
-      setTasks((prev) => prev.filter((t) => t.id !== id))
-    } catch (e) {
-      setErrorMsg(`删除失败：${e?.message || e}`)
-      fetchTasks()
-    }
+    if (!confirm('确认删除这个任务吗？')) return
+    await supabase.from('progress').delete().eq('id', id)
+    fetchTasks()
   }
 
-  if (loading) {
-    return (
-      <div style={{ padding: 40, textAlign: 'center' }}>
-        <p>正在检查登录状态…</p>
-      </div>
-    )
+  const setActiveTask = async (id) => {
+    // 把所有任务设为非 active，再设当前任务为 active
+    await supabase.from('progress').update({ is_active: false }).eq('user_id', user.id)
+    await supabase.from('progress').update({ is_active: true }).eq('id', id)
+    fetchTasks()
   }
+
+  if (loading) return <p>正在加载…</p>
 
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ marginTop: 0 }}>📊 学习进度</h1>
-          <Link href="/" style={styles.homeBtn}>
-            返回主页
-          </Link>
-        </div>
-
+        <h1>📊 学习进度</h1>
         <div style={styles.row}>
           <input
             value={newTask}
             onChange={(e) => setNewTask(e.target.value)}
             placeholder="输入任务名称"
             style={styles.input}
-            onKeyDown={(e) => e.key === 'Enter' && addTask()}
           />
-          <button onClick={addTask} disabled={adding || !newTask.trim()} style={styles.primaryBtn}>
-            {adding ? '添加中…' : '添加任务'}
+          <input
+            type="number"
+            min="1"
+            value={estimatedMinutes}
+            onChange={(e) => setEstimatedMinutes(Number(e.target.value))}
+            style={{ ...styles.input, width: 80 }}
+            placeholder="分钟"
+          />
+          <button onClick={addTask} disabled={adding} style={styles.primaryBtn}>
+            添加任务
           </button>
           <button onClick={fetchTasks} style={styles.ghostBtn}>刷新</button>
         </div>
-
-        {infoMsg ? <div style={styles.info}>{infoMsg}</div> : null}
-        {errorMsg ? <div style={styles.error}>{errorMsg}</div> : null}
-
-        <div style={{ marginTop: 10 }}>
-          {(!tasks || tasks.length === 0) ? (
-            <div style={styles.empty}>暂无任务，先在上方添加一个吧～</div>
-          ) : (
-            <ul style={styles.list}>
-              {tasks.map((t) => (
-                <li key={t.id} style={styles.item}>
-                  <div style={{ flex: 1, fontWeight: 500 }}>{t.task}</div>
-
-                  <div style={styles.progressBox}>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={t.progress ?? 0}
-                      onChange={(e) => updateProgress(t.id, e.target.value)}
-                      style={styles.progressInput}
-                    />
-                    <span style={{ marginLeft: 6 }}>%</span>
-                  </div>
-
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={t.progress ?? 0}
-                    onChange={(e) => updateProgress(t.id, e.target.value)}
-                    style={styles.range}
-                  />
-
-                  <button onClick={() => deleteTask(t.id)} style={styles.dangerBtn}>删除</button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <ul style={styles.list}>
+          {tasks.map((t) => (
+            <li key={t.id} style={styles.item}>
+              <div style={{ flex: 1 }}>
+                <strong>{t.task}</strong>
+                <div>进度: {t.progress}% | 预计: {t.estimated_minutes} 分钟</div>
+                {t.is_active && <div style={{ color: 'green' }}>当前进行中</div>}
+              </div>
+              <button onClick={() => setActiveTask(t.id)} style={styles.primaryBtn}>设为当前</button>
+              <button onClick={() => deleteTask(t.id)} style={styles.dangerBtn}>删除</button>
+            </li>
+          ))}
+        </ul>
+        <Link href="/" style={styles.homeBtn}>返回主页</Link>
       </div>
     </div>
   )
