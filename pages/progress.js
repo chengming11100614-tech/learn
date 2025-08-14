@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
+import Link from 'next/link'
 
 export default function ProgressPage() {
   const router = useRouter()
@@ -143,7 +144,12 @@ export default function ProgressPage() {
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <h1 style={{ marginTop: 0 }}>📊 学习进度</h1>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ marginTop: 0 }}>📊 学习进度</h1>
+          <Link href="/" style={styles.homeBtn}>
+            返回主页
+          </Link>
+        </div>
 
         <div style={styles.row}>
           <input
@@ -216,6 +222,15 @@ const styles = {
     borderRadius: 12,
     padding: 20,
     boxShadow: '0 6px 24px rgba(0,0,0,0.06)',
+  },
+  homeBtn: {
+    padding: '8px 12px',
+    borderRadius: 8,
+    background: '#f3f4f6',
+    color: '#111827',
+    textDecoration: 'none',
+    border: '1px solid #e5e7eb',
+    fontSize: 14,
   },
   row: {
     display: 'flex',
@@ -314,4 +329,3 @@ const styles = {
     fontSize: 14,
   },
 }
-
