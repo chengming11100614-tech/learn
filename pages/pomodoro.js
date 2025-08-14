@@ -110,7 +110,8 @@ export default function PomodoroPage() {
         </button>
       </div>
 
-      <Link href="/home" style={styles.backButton}>
+      {/* 修改这里的 href 指向首页 / */}
+      <Link href="/" style={styles.backButton}>
         返回主页
       </Link>
     </div>
