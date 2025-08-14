@@ -8,17 +8,18 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
 
   async function handleRegister(e) {
     e.preventDefault();
     setError('');
+    setMessage('');
 
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) {
       setError(error.message);
     } else {
-      alert('注册成功，请登录！');
-      router.push('/login');
+      setMessage(`注册成功，请到邮箱 (${email}) 点击验证链接后再登录。`);
     }
   }
 
@@ -27,6 +28,7 @@ export default function RegisterPage() {
       <div style={styles.card}>
         <h2 style={styles.title}>注册</h2>
         {error && <p style={styles.error}>{error}</p>}
+        {message && <p style={styles.success}>{message}</p>}
         <form onSubmit={handleRegister} style={styles.form}>
           <input
             type="email"
@@ -110,6 +112,11 @@ const styles = {
     fontSize: '0.9rem',
     textAlign: 'center',
     marginBottom: '1rem'
+  },
+  success: {
+    color: 'green',
+    fontSize: '0.9rem',
+    textAlign: 'center',
+    marginBottom: '1rem'
   }
 };
-
