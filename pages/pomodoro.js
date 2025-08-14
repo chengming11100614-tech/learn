@@ -1,301 +1,216 @@
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/router'
+import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { supabase } from '../lib/supabaseClient'
 
-export default function ProgressPage() {
-  const router = useRouter()
+export default function PomodoroPage() {
+  const TOMATO_MINUTES = 25 // 一个番茄固定 25 分钟
+  const [studyTomatoes, setStudyTomatoes] = useState(1) // 学习番茄个数
+  const [breakMinutes, setBreakMinutes] = useState(5)
+  const [timeLeft, setTimeLeft] = useState(TOMATO_MINUTES * 60)
+  const [isRunning, setIsRunning] = useState(false)
+  const [isBreak, setIsBreak] = useState(false)
+  const [activeTask, setActiveTask] = useState(null)
 
-  const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const timerRef = useRef(null)
 
-  const [tasks, setTasks] = useState([])
-  const [newTask, setNewTask] = useState('')
-  const [estimatedTomatoes, setEstimatedTomatoes] = useState(1)
-  const [adding, setAdding] = useState(false)
-
-  const [errorMsg, setErrorMsg] = useState('')
-  const [infoMsg, setInfoMsg] = useState('')
-
-  // 检查登录
-  useEffect(() => {
-    let sub
-    const init = async () => {
-      const { data, error } = await supabase.auth.getSession()
-      if (error) {
-        setErrorMsg(`获取登录状态失败：${error.message}`)
-        setLoading(false)
-        return
-      }
-      const u = data?.session?.user
-      if (!u) {
-        router.replace('/login')
-        return
-      }
-      setUser(u)
-      setLoading(false)
-
-      const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user || null)
-        if (!session?.user) router.replace('/login')
-      })
-      sub = listener
-    }
-
-    init()
-    return () => {
-      sub?.subscription?.unsubscribe?.()
-    }
-  }, [router])
-
-  // 获取任务
-  const fetchTasks = async () => {
-    if (!user) return
-    setErrorMsg('')
-    setInfoMsg('')
-    try {
-      const { data, error } = await supabase
-        .from('progress')
-        .select('id, task, progress, estimated_tomatoes, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
-      if (error) throw error
-      setTasks(data || [])
-    } catch (e) {
-      setErrorMsg(`获取任务失败：${e.message}`)
+  // 获取当前激活任务
+  const fetchActiveTask = async () => {
+    const { data, error } = await supabase
+      .from('progress')
+      .select('*')
+      .eq('is_active', true)
+      .limit(1)
+    if (!error && data && data.length > 0) {
+      setActiveTask(data[0])
+    } else {
+      setActiveTask(null)
     }
   }
 
   useEffect(() => {
-    if (user) fetchTasks()
-  }, [user])
+    fetchActiveTask()
+  }, [])
 
-  // 添加任务
-  const addTask = async () => {
-    if (!newTask.trim() || !user) return
-    setAdding(true)
-    setErrorMsg('')
-    setInfoMsg('')
-    try {
-      const { error } = await supabase
-        .from('progress')
-        .insert([{
-          task: newTask.trim(),
-          user_id: user.id,
-          progress: 0,
-          estimated_tomatoes: Math.max(1, estimatedTomatoes)
-        }])
-      if (error) throw error
-      setNewTask('')
-      setEstimatedTomatoes(1)
-      setInfoMsg('添加成功')
-      fetchTasks()
-    } catch (e) {
-      setErrorMsg(`添加任务失败：${e.message}`)
-    } finally {
-      setAdding(false)
-    }
+  // 格式化时间 mm:ss
+  const formatTime = (seconds) => {
+    const m = String(Math.floor(seconds / 60)).padStart(2, '0')
+    const s = String(seconds % 60).padStart(2, '0')
+    return `${m}:${s}`
   }
 
-  // 更新已完成番茄数
-  const updateProgress = async (id, value) => {
-    const tomatoes = Math.max(0, Number(value) || 0)
-    const task = tasks.find(t => t.id === id)
-    if (!task) return
-    const finalValue = Math.min(tomatoes, task.estimated_tomatoes)
-
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, progress: finalValue } : t))
-
-    try {
-      const { error } = await supabase
-        .from('progress')
-        .update({ progress: finalValue })
-        .eq('id', id)
-      if (error) throw error
-      setInfoMsg('进度已保存')
-    } catch (e) {
-      setErrorMsg(`更新进度失败：${e.message}`)
-      fetchTasks()
+  // 倒计时逻辑
+  useEffect(() => {
+    if (isRunning) {
+      timerRef.current = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current)
+            setIsRunning(false)
+            if (!isBreak) {
+              // 完成一个番茄
+              if (activeTask) {
+                updateTaskProgress()
+              }
+              alert('一个番茄完成！休息一下吧 🍵')
+              setIsBreak(true)
+              setTimeLeft(breakMinutes * 60)
+              setIsRunning(true)
+            } else {
+              alert('休息结束！开始下一个番茄吧 📚')
+              setIsBreak(false)
+              setTimeLeft(TOMATO_MINUTES * 60)
+              setIsRunning(true)
+            }
+            return prev
+          }
+          return prev - 1
+        })
+      }, 1000)
+    } else {
+      clearInterval(timerRef.current)
     }
+    return () => clearInterval(timerRef.current)
+  }, [isRunning, isBreak, activeTask])
+
+  // 更新任务进度
+  const updateTaskProgress = async () => {
+    if (!activeTask) return
+    const estimatedTomatoes = activeTask.estimated_tomatoes || 1
+    const increment = Math.round((1 / estimatedTomatoes) * 100)
+    const newProgress = Math.min(100, activeTask.progress + increment)
+    await supabase.from('progress').update({ progress: newProgress }).eq('id', activeTask.id)
+    fetchActiveTask()
   }
 
-  // 删除任务
-  const deleteTask = async (id) => {
-    if (!window.confirm('确认删除这个任务吗？')) return
-    try {
-      const { error } = await supabase.from('progress').delete().eq('id', id)
-      if (error) throw error
-      setInfoMsg('已删除')
-      setTasks(prev => prev.filter(t => t.id !== id))
-    } catch (e) {
-      setErrorMsg(`删除失败：${e.message}`)
-      fetchTasks()
-    }
+  // 开始 / 暂停
+  const handleStartPause = () => {
+    setIsRunning((prev) => !prev)
   }
 
-  if (loading) {
-    return <div style={{ padding: 40, textAlign: 'center' }}>正在检查登录状态…</div>
+  // 重置
+  const handleReset = () => {
+    clearInterval(timerRef.current)
+    setIsRunning(false)
+    setIsBreak(false)
+    setTimeLeft(TOMATO_MINUTES * 60)
+  }
+
+  // 修改学习番茄个数
+  const handleTomatoChange = (value) => {
+    const num = Math.max(1, Number(value)) // 至少 1 个番茄
+    setStudyTomatoes(num)
+    setTimeLeft(TOMATO_MINUTES * 60) // 每个番茄固定 25 分钟
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <h1>📊 学习进度（番茄数）</h1>
+    <div style={styles.container}>
+      <h1>🍅 番茄钟</h1>
+      {activeTask && (
+        <p>当前任务：{activeTask.task}（进度 {activeTask.progress}%）</p>
+      )}
+      <p style={styles.mode}>{isBreak ? '休息时间 🍵' : '学习时间 📚'}</p>
+      <p style={styles.timer}>{formatTime(timeLeft)}</p>
 
-        <div style={styles.row}>
-          <input
-            value={newTask}
-            onChange={(e) => setNewTask(e.target.value)}
-            placeholder="输入任务名称"
-            style={styles.input}
-            onKeyDown={(e) => e.key === 'Enter' && addTask()}
-          />
+      {/* 设置学习番茄个数和休息时间 */}
+      <div style={styles.settings}>
+        <label>
+          学习番茄个数：
           <input
             type="number"
-            value={estimatedTomatoes}
-            onChange={(e) => setEstimatedTomatoes(Number(e.target.value))}
-            min={1}
-            style={{ ...styles.input, width: 100 }}
-            placeholder="番茄数"
+            value={studyTomatoes}
+            onChange={(e) => handleTomatoChange(e.target.value)}
+            style={styles.input}
+            disabled={isRunning}
           />
-          <button onClick={addTask} disabled={adding || !newTask.trim()} style={styles.primaryBtn}>
-            {adding ? '添加中…' : '添加任务'}
-          </button>
-          <button onClick={fetchTasks} style={styles.ghostBtn}>刷新</button>
-        </div>
-
-        {infoMsg && <div style={styles.info}>{infoMsg}</div>}
-        {errorMsg && <div style={styles.error}>{errorMsg}</div>}
-
-        <div style={{ marginTop: 10 }}>
-          {tasks.length === 0 ? (
-            <div style={styles.empty}>暂无任务，先在上方添加一个吧～</div>
-          ) : (
-            <ul style={styles.list}>
-              {tasks.map(t => (
-                <li key={t.id} style={styles.item}>
-                  <div style={{ flex: 1, fontWeight: 500 }}>
-                    {t.task} ({t.progress}/{t.estimated_tomatoes} 番茄)
-                  </div>
-
-                  <input
-                    type="number"
-                    min={0}
-                    max={t.estimated_tomatoes}
-                    value={t.progress}
-                    onChange={(e) => updateProgress(t.id, e.target.value)}
-                    style={styles.progressInput}
-                  />
-                  <button onClick={() => deleteTask(t.id)} style={styles.dangerBtn}>删除</button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        </label>
+        <label>
+          休息时间（分钟）：
+          <input
+            type="number"
+            value={breakMinutes}
+            onChange={(e) => setBreakMinutes(Math.max(1, Number(e.target.value)))}
+            style={styles.input}
+            disabled={isRunning}
+          />
+        </label>
       </div>
+
+      {/* 控制按钮 */}
+      <div style={styles.buttonContainer}>
+        <button onClick={handleStartPause} style={styles.button}>
+          {isRunning ? '暂停' : '开始'}
+        </button>
+        <button onClick={handleReset} style={styles.resetButton}>重置</button>
+      </div>
+
+      <Link href="/" style={styles.backButton}>返回主页</Link>
     </div>
   )
 }
 
 const styles = {
-  page: {
-    minHeight: '100vh',
-    background: '#f6f7fb',
-    padding: '40px 16px',
-  },
-  card: {
-    maxWidth: 720,
+  container: {
+    maxWidth: '500px',
     margin: '0 auto',
-    background: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    boxShadow: '0 6px 24px rgba(0,0,0,0.06)',
+    padding: '40px',
+    textAlign: 'center',
+    fontFamily: 'Arial, sans-serif'
   },
-  row: {
-    display: 'flex',
-    gap: 8,
-    alignItems: 'center',
-    marginBottom: 8,
-    flexWrap: 'wrap',
+  mode: {
+    fontSize: '20px',
+    margin: '10px 0',
+    color: '#666'
   },
-  input: {
-    flex: 1,
-    minWidth: 120,
-    padding: '10px 12px',
-    border: '1px solid #e5e7eb',
-    borderRadius: 8,
-    outline: 'none',
+  timer: {
+    fontSize: '56px',
+    fontWeight: 'bold',
+    margin: '20px 0'
   },
-  primaryBtn: {
-    padding: '10px 14px',
-    borderRadius: 8,
-    border: 'none',
-    background: '#0070f3',
-    color: '#fff',
-    cursor: 'pointer',
-  },
-  ghostBtn: {
-    padding: '10px 14px',
-    borderRadius: 8,
-    border: '1px solid #e5e7eb',
-    background: '#fff',
-    cursor: 'pointer',
-  },
-  dangerBtn: {
-    padding: '8px 10px',
-    borderRadius: 8,
-    border: '1px solid #ef4444',
-    color: '#ef4444',
-    background: '#fff',
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  },
-  list: {
-    listStyle: 'none',
-    padding: 0,
-    margin: '8px 0 0',
+  settings: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 10,
+    gap: '10px',
+    marginTop: '20px',
+    marginBottom: '20px'
   },
-  item: {
+  input: {
+    width: '60px',
+    marginLeft: '10px',
+    padding: '5px',
+    fontSize: '16px',
+    textAlign: 'center'
+  },
+  buttonContainer: {
     display: 'flex',
-    gap: 12,
-    alignItems: 'center',
-    padding: '12px 12px',
-    border: '1px solid #eee',
-    borderRadius: 10,
+    justifyContent: 'center',
+    gap: '10px',
+    marginTop: '20px'
   },
-  progressInput: {
-    width: 70,
-    padding: '8px 10px',
-    border: '1px solid #e5e7eb',
-    borderRadius: 8,
-    outline: 'none',
+  button: {
+    padding: '10px 20px',
+    fontSize: '16px',
+    backgroundColor: '#0070f3',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer'
   },
-  empty: {
-    padding: '16px 12px',
-    border: '1px dashed #e5e7eb',
-    borderRadius: 10,
-    color: '#6b7280',
-    background: '#fafafa',
-    textAlign: 'center',
+  resetButton: {
+    padding: '10px 20px',
+    fontSize: '16px',
+    backgroundColor: '#888',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer'
   },
-  info: {
-    padding: '8px 12px',
-    background: '#ecfdf5',
-    color: '#065f46',
-    border: '1px solid #a7f3d0',
-    borderRadius: 8,
-    marginBottom: 8,
-    fontSize: 14,
-  },
-  error: {
-    padding: '10px 12px',
-    background: '#fef2f2',
-    color: '#991b1b',
-    border: '1px solid #fecaca',
-    borderRadius: 8,
-    marginBottom: 8,
-    fontSize: 14,
-  },
+  backButton: {
+    display: 'inline-block',
+    marginTop: '30px',
+    padding: '10px 20px',
+    backgroundColor: '#ff4d4d',
+    color: '#fff',
+    borderRadius: '6px',
+    textDecoration: 'none'
+  }
 }
