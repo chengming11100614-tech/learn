@@ -1,6 +1,8 @@
+// pages/progress.js
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
+import Link from 'next/link'
 
 export default function ProgressPage() {
   const router = useRouter()
@@ -55,7 +57,7 @@ export default function ProgressPage() {
     try {
       const { data, error } = await supabase
         .from('progress')
-        .select('id, task, progress, estimated_tomatoes, created_at')
+        .select('id, task, progress, estimated_tomatoes, is_active, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true })
       if (error) throw error
@@ -82,7 +84,8 @@ export default function ProgressPage() {
           task: newTask.trim(),
           user_id: user.id,
           progress: 0,
-          estimated_tomatoes: Math.max(1, estimatedTomatoes)
+          estimated_tomatoes: Math.max(1, estimatedTomatoes),
+          is_active: false
         }])
       if (error) throw error
       setNewTask('')
@@ -132,6 +135,31 @@ export default function ProgressPage() {
     }
   }
 
+  // 设为当前任务
+  const setActiveTask = async (id) => {
+    try {
+      // 清除其他任务的 is_active
+      await supabase.from('progress').update({ is_active: false }).eq('user_id', user.id)
+      // 设置当前任务
+      await supabase.from('progress').update({ is_active: true }).eq('id', id)
+      fetchTasks()
+      setInfoMsg('已设为当前任务')
+    } catch (e) {
+      setErrorMsg(`设置当前任务失败：${e.message}`)
+    }
+  }
+
+  // 退出当前任务
+  const clearActiveTask = async () => {
+    try {
+      await supabase.from('progress').update({ is_active: false }).eq('user_id', user.id)
+      fetchTasks()
+      setInfoMsg('已退出当前任务')
+    } catch (e) {
+      setErrorMsg(`退出当前任务失败：${e.message}`)
+    }
+  }
+
   if (loading) {
     return <div style={{ padding: 40, textAlign: 'center' }}>正在检查登录状态…</div>
   }
@@ -140,6 +168,11 @@ export default function ProgressPage() {
     <div style={styles.page}>
       <div style={styles.card}>
         <h1>📊 学习进度（番茄数）</h1>
+
+        <div style={styles.topBar}>
+          <Link href="/" style={styles.backBtn}>返回主页</Link>
+          <button onClick={clearActiveTask} style={styles.ghostBtn}>退出当前任务</button>
+        </div>
 
         <div style={styles.row}>
           <input
@@ -175,6 +208,7 @@ export default function ProgressPage() {
                 <li key={t.id} style={styles.item}>
                   <div style={{ flex: 1, fontWeight: 500 }}>
                     {t.task} ({t.progress}/{t.estimated_tomatoes} 番茄)
+                    {t.is_active && <span style={{ color: 'green', marginLeft: 8 }}>【当前任务】</span>}
                   </div>
 
                   <input
@@ -185,6 +219,8 @@ export default function ProgressPage() {
                     onChange={(e) => updateProgress(t.id, e.target.value)}
                     style={styles.progressInput}
                   />
+
+                  <button onClick={() => setActiveTask(t.id)} style={styles.primaryBtnSmall}>设为当前</button>
                   <button onClick={() => deleteTask(t.id)} style={styles.dangerBtn}>删除</button>
                 </li>
               ))}
@@ -210,6 +246,18 @@ const styles = {
     padding: 20,
     boxShadow: '0 6px 24px rgba(0,0,0,0.06)',
   },
+  topBar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: 12
+  },
+  backBtn: {
+    padding: '8px 14px',
+    borderRadius: 8,
+    background: '#ff4d4d',
+    color: '#fff',
+    textDecoration: 'none'
+  },
   row: {
     display: 'flex',
     gap: 8,
@@ -232,6 +280,15 @@ const styles = {
     background: '#0070f3',
     color: '#fff',
     cursor: 'pointer',
+  },
+  primaryBtnSmall: {
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: 'none',
+    background: '#10b981',
+    color: '#fff',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
   },
   ghostBtn: {
     padding: '10px 14px',
