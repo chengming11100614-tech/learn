@@ -12,25 +12,32 @@ export default function PomodoroPage() {
 
   const timerRef = useRef(null)
 
+  // 获取正在进行的任务
   const fetchActiveTask = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('progress')
       .select('*')
       .eq('is_active', true)
       .limit(1)
-    if (data && data.length > 0) setActiveTask(data[0])
+    if (!error && data && data.length > 0) {
+      setActiveTask(data[0])
+    } else {
+      setActiveTask(null)
+    }
   }
 
   useEffect(() => {
     fetchActiveTask()
   }, [])
 
+  // 格式化 mm:ss
   const formatTime = (seconds) => {
     const m = String(Math.floor(seconds / 60)).padStart(2, '0')
     const s = String(seconds % 60).padStart(2, '0')
     return `${m}:${s}`
   }
 
+  // 倒计时逻辑
   useEffect(() => {
     if (isRunning) {
       timerRef.current = setInterval(() => {
@@ -39,7 +46,7 @@ export default function PomodoroPage() {
             clearInterval(timerRef.current)
             setIsRunning(false)
             if (!isBreak) {
-              // 学习时间结束
+              // 学习时间结束，推进任务进度
               if (activeTask) {
                 updateTaskProgress()
               }
@@ -61,9 +68,11 @@ export default function PomodoroPage() {
     } else {
       clearInterval(timerRef.current)
     }
-    return () => clearInterval(timerRef.current)
-  }, [isRunning, isBreak, activeTask])
 
+    return () => clearInterval(timerRef.current)
+  }, [isRunning, isBreak, activeTask, studyMinutes, breakMinutes])
+
+  // 推进任务进度
   const updateTaskProgress = async () => {
     if (!activeTask) return
     const increment = Math.round((studyMinutes / activeTask.estimated_minutes) * 100)
@@ -72,13 +81,36 @@ export default function PomodoroPage() {
     fetchActiveTask()
   }
 
+  // 开始 / 暂停
+  const handleStartPause = () => {
+    setIsRunning((prev) => !prev)
+  }
+
+  // 重置
+  const handleReset = () => {
+    clearInterval(timerRef.current)
+    setIsRunning(false)
+    setIsBreak(false)
+    setTimeLeft(studyMinutes * 60)
+  }
+
   return (
     <div style={styles.container}>
       <h1>⏱ 番茄钟</h1>
-      {activeTask && <p>当前任务：{activeTask.task} ({activeTask.progress}%)</p>}
+      {activeTask && (
+        <p>当前任务：{activeTask.task}（进度 {activeTask.progress}%）</p>
+      )}
       <p style={styles.mode}>{isBreak ? '休息时间 🍵' : '学习时间 📚'}</p>
       <p style={styles.timer}>{formatTime(timeLeft)}</p>
-      {/* 控制按钮略 */}
+
+      {/* 控制按钮 */}
+      <div style={styles.buttonContainer}>
+        <button onClick={handleStartPause} style={styles.button}>
+          {isRunning ? '暂停' : '开始'}
+        </button>
+        <button onClick={handleReset} style={styles.resetButton}>重置</button>
+      </div>
+
       <Link href="/" style={styles.backButton}>返回主页</Link>
     </div>
   )
@@ -101,20 +133,6 @@ const styles = {
     fontSize: '56px',
     fontWeight: 'bold',
     margin: '20px 0'
-  },
-  settings: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    marginTop: '20px',
-    marginBottom: '20px'
-  },
-  input: {
-    width: '60px',
-    marginLeft: '10px',
-    padding: '5px',
-    fontSize: '16px',
-    textAlign: 'center'
   },
   buttonContainer: {
     display: 'flex',
